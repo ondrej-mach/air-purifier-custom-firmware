@@ -1,0 +1,21 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${config:idf.espIdfPath}/components/**",
+                "${config:idf.espMatterPath}/components/**",
+                "${config:idf.espMatterPath}/connectedhomeip/connectedhomeip/src/**",
+                "${config:idf.espMatterPath}/examples/common/**",
+                "${config:idf.espMatterPath}/device_hal/**"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c17",
+            "cppStandard": "gnu++17",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}
