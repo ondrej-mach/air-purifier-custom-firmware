@@ -63,7 +63,9 @@ esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle, uint16_
 
 esp_err_t app_driver_air_purifier_set_defaults(uint16_t endpoint_id)
 {
+    
     esp_err_t err = ESP_OK;
+    /*  Not really important
     void *priv_data = endpoint::get_priv_data(endpoint_id);
     led_driver_handle_t handle = (led_driver_handle_t)priv_data;
     node_t *node = node::get();
@@ -72,28 +74,13 @@ esp_err_t app_driver_air_purifier_set_defaults(uint16_t endpoint_id)
     attribute_t *attribute = NULL;
     esp_matter_attr_val_t val = esp_matter_invalid(NULL);
 
-    /* Setting power */
+    // Setting power
     cluster = cluster::get(endpoint, OnOff::Id);
     attribute = attribute::get(cluster, OnOff::Attributes::OnOff::Id);
     attribute::get_val(attribute, &val);
     err |= app_driver_room_air_conditioner_set_power(handle, &val);
 
+*/
     return err;
-}
-
-app_driver_handle_t app_driver_air_purifier_init()
-{
-    /* Initialize led */
-    led_driver_config_t config = led_driver_get_config();
-    led_driver_handle_t handle = led_driver_init(&config);
-    return (app_driver_handle_t)handle;
-}
-
-app_driver_handle_t app_driver_button_init()
-{
-    /* Initialize button */
-    button_config_t config = button_driver_get_config();
-    button_handle_t handle = iot_button_create(&config);
-    iot_button_register_cb(handle, BUTTON_PRESS_DOWN, app_driver_button_toggle_cb, NULL);
-    return (app_driver_handle_t)handle;
+    
 }

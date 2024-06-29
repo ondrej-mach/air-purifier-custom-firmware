@@ -135,44 +135,46 @@ extern "C" void app_main()
     nvs_flash_init();
 
     /* Initialize driver */
-    app_driver_handle_t air_purifier_handle = app_driver_air_purifier_init();
-    app_driver_handle_t button_handle = app_driver_button_init();
-    app_reset_button_register(button_handle);
+    // removed
+    //  TODO this might be useful instead of registering the button: esp_matter::factory_reset();
 
     /* Create a Matter node and add the mandatory Root Node device type on endpoint 0 */
     node::config_t node_config;
     node_t *node = node::create(&node_config, app_attribute_update_cb, app_identification_cb);
     ABORT_APP_ON_FAILURE(node != nullptr, ESP_LOGE(TAG, "Failed to create Matter node"));
 
+
     air_purifier::config_t air_purifier_config;
     // air_purifier_config.fan_control = DEFAULT_POWER;
-    endpoint_t *endpoint = air_purifier::create(node, &air_purifier_config, ENDPOINT_FLAG_NONE, air_purifier_handle);
-    ABORT_APP_ON_FAILURE(endpoint != nullptr, ESP_LOGE(TAG, "Failed to create air purifier endpoint"));
+    endpoint_t *air_purifier_endpoint = air_purifier::create(node, &air_purifier_config, ENDPOINT_FLAG_NONE, NULL);
+    ABORT_APP_ON_FAILURE(air_purifier_endpoint != nullptr, ESP_LOGE(TAG, "Failed to create air purifier endpoint"));
 
-    air_purifier_endpoint_id = endpoint::get_id(endpoint);
+    air_purifier_endpoint_id = endpoint::get_id(air_purifier_endpoint);
     ESP_LOGI(TAG, "Air purifier created with endpoint_id %d", air_purifier_endpoint_id);
 
+    cluster::hepa_filter_monitoring::config_t hepa_filter_monitoring_config;
+    cluster_t *hepa_filter_monitoring_cluster = cluster::hepa_filter_monitoring::create(air_purifier_endpoint, &hepa_filter_monitoring_config, CLUSTER_FLAG_SERVER);
+    ABORT_APP_ON_FAILURE(hepa_filter_monitoring_cluster != nullptr, ESP_LOGE(TAG, "Failed to add HEPA filter monitoring cluster"));
 
-    /* Add needed clusters */
-    cluster::air_quality::config_t air_quality_config;
-    cluster_t *air_quality_cluster = cluster::air_quality::create(endpoint, &air_quality_config, CLUSTER_FLAG_SERVER);
-    ABORT_APP_ON_FAILURE(air_quality_cluster != nullptr, ESP_LOGE(TAG, "Failed to add air quality cluster"));
+
+
+    // Add air quality sensor endpoint
+    air_quality_sensor::config_t air_quality_sensor_config;
+    endpoint_t *air_quality_sensor_endpoint = air_quality_sensor::create(node, &air_quality_sensor_config, ENDPOINT_FLAG_NONE, NULL);
+    ABORT_APP_ON_FAILURE(air_quality_sensor_endpoint != nullptr, ESP_LOGE(TAG, "Failed to add air quality cluster"));
 
     cluster::pm1_concentration_measurement::config_t pm1_config;
-    cluster_t *pm1_cluster = cluster::pm1_concentration_measurement::create(endpoint, &pm1_config, CLUSTER_FLAG_SERVER);
+    cluster_t *pm1_cluster = cluster::pm1_concentration_measurement::create(air_quality_sensor_endpoint, &pm1_config, CLUSTER_FLAG_SERVER);
     ABORT_APP_ON_FAILURE(pm1_cluster != nullptr, ESP_LOGE(TAG, "Failed to add PM1 cluster"));
 
     cluster::pm25_concentration_measurement::config_t pm25_config;
-    cluster_t *pm25_cluster = cluster::pm25_concentration_measurement::create(endpoint, &pm25_config, CLUSTER_FLAG_SERVER);
+    cluster_t *pm25_cluster = cluster::pm25_concentration_measurement::create(air_quality_sensor_endpoint, &pm25_config, CLUSTER_FLAG_SERVER);
     ABORT_APP_ON_FAILURE(pm25_cluster != nullptr, ESP_LOGE(TAG, "Failed to add PM2.5 cluster"));
 
     cluster::pm10_concentration_measurement::config_t pm10_config;
-    cluster_t *pm10_cluster = cluster::pm10_concentration_measurement::create(endpoint, &pm10_config, CLUSTER_FLAG_SERVER);
+    cluster_t *pm10_cluster = cluster::pm10_concentration_measurement::create(air_quality_sensor_endpoint, &pm10_config, CLUSTER_FLAG_SERVER);
     ABORT_APP_ON_FAILURE(pm10_cluster != nullptr, ESP_LOGE(TAG, "Failed to add PM10 cluster"));
 
-    cluster::hepa_filter_monitoring::config_t hepa_filter_monitoring_config;
-    cluster_t *epa_filter_monitoring_cluster = cluster::hepa_filter_monitoring::create(endpoint, &hepa_filter_monitoring_config, CLUSTER_FLAG_SERVER);
-    ABORT_APP_ON_FAILURE(epa_filter_monitoring_cluster != nullptr, ESP_LOGE(TAG, "Failed to add HEPA filter monitoring cluster"));
 
 
     /* Matter start */
