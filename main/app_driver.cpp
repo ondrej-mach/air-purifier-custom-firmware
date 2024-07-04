@@ -21,6 +21,8 @@ using namespace esp_matter;
 
 static const char *TAG = "app_driver";
 extern uint16_t air_purifier_endpoint_id;
+extern uint16_t air_quality_sensor_endpoint_id;
+
 
 /* Do any conversions/remapping for the actual value here */
 static esp_err_t app_driver_room_air_conditioner_set_power(led_driver_handle_t handle, esp_matter_attr_val_t *val)
@@ -57,9 +59,34 @@ esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle, uint16_
                 err = app_driver_room_air_conditioner_set_power(handle, val);
             }
         }
+    } else if (endpoint_id == air_quality_sensor_endpoint_id) {
+
+
     }
     return err;
 }
+
+
+void app_driver_update_air_quality()
+{
+    ESP_LOGI(TAG, "Updating air quality");
+
+    uint16_t endpoint_id = air_quality_sensor_endpoint_id;
+    uint32_t cluster_id = AirQuality::Id;
+    uint32_t attribute_id = AirQuality::Attributes::AirQuality::Id;
+
+    node_t *node = node::get();
+    endpoint_t *endpoint = endpoint::get(node, endpoint_id);
+    cluster_t *cluster = cluster::get(endpoint, cluster_id);
+    attribute_t *attribute = attribute::get(cluster, attribute_id);
+
+    esp_matter_attr_val_t val = esp_matter_invalid(NULL);
+    attribute::get_val(attribute, &val);
+    val.val.u8 = static_cast<uint8_t>(AirQuality::AirQualityEnum::kFair);
+
+    attribute::update(endpoint_id, cluster_id, attribute_id, &val);
+}
+
 
 esp_err_t app_driver_air_purifier_set_defaults(uint16_t endpoint_id)
 {

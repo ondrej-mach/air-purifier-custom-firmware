@@ -62,3 +62,7 @@ esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle, uint16_
  */
 esp_err_t app_driver_air_purifier_set_defaults(uint16_t endpoint_id);
 
+
+
+void app_driver_update_air_quality();
+

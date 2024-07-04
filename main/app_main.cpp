@@ -22,7 +22,8 @@
 #include <app/server/Server.h>
 
 static const char *TAG = "app_main";
-uint16_t air_purifier_endpoint_id = 0;
+uint16_t air_purifier_endpoint_id;
+uint16_t air_quality_sensor_endpoint_id;
 
 using namespace esp_matter;
 using namespace esp_matter::attribute;
@@ -148,7 +149,6 @@ extern "C" void app_main()
     // air_purifier_config.fan_control = DEFAULT_POWER;
     endpoint_t *air_purifier_endpoint = air_purifier::create(node, &air_purifier_config, ENDPOINT_FLAG_NONE, NULL);
     ABORT_APP_ON_FAILURE(air_purifier_endpoint != nullptr, ESP_LOGE(TAG, "Failed to create air purifier endpoint"));
-
     air_purifier_endpoint_id = endpoint::get_id(air_purifier_endpoint);
     ESP_LOGI(TAG, "Air purifier created with endpoint_id %d", air_purifier_endpoint_id);
 
@@ -162,6 +162,8 @@ extern "C" void app_main()
     air_quality_sensor::config_t air_quality_sensor_config;
     endpoint_t *air_quality_sensor_endpoint = air_quality_sensor::create(node, &air_quality_sensor_config, ENDPOINT_FLAG_NONE, NULL);
     ABORT_APP_ON_FAILURE(air_quality_sensor_endpoint != nullptr, ESP_LOGE(TAG, "Failed to add air quality cluster"));
+    air_quality_sensor_endpoint_id = endpoint::get_id(air_quality_sensor_endpoint);
+    ESP_LOGI(TAG, "Air quality sensor created with endpoint_id %d", air_quality_sensor_endpoint_id);
 
     cluster::pm1_concentration_measurement::config_t pm1_config;
     cluster_t *pm1_cluster = cluster::pm1_concentration_measurement::create(air_quality_sensor_endpoint, &pm1_config, CLUSTER_FLAG_SERVER);
@@ -174,7 +176,7 @@ extern "C" void app_main()
     cluster::pm10_concentration_measurement::config_t pm10_config;
     cluster_t *pm10_cluster = cluster::pm10_concentration_measurement::create(air_quality_sensor_endpoint, &pm10_config, CLUSTER_FLAG_SERVER);
     ABORT_APP_ON_FAILURE(pm10_cluster != nullptr, ESP_LOGE(TAG, "Failed to add PM10 cluster"));
-
+    // Add temp, humidity?
 
 
     /* Matter start */
@@ -183,6 +185,7 @@ extern "C" void app_main()
 
     /* Starting driver with default values */
     app_driver_air_purifier_set_defaults(air_purifier_endpoint_id);
+    app_driver_update_air_quality();
 
 #if CONFIG_ENABLE_CHIP_SHELL
     esp_matter::console::diagnostics_register_commands();
