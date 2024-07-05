@@ -13,9 +13,11 @@
 #include <esp_matter.h>
 #include <esp_matter_console.h>
 #include <esp_matter_ota.h>
+#include <esp_matter_cluster.h>
+#include <esp_matter_feature.h> // Todo probably not needed
 
 #include <common_macros.h>
-#include <app_priv.h>
+#include <app_driver.h>
 #include <app_reset.h>
 
 #include <app/server/CommissioningWindowManager.h> 
@@ -117,15 +119,17 @@ static esp_err_t app_identification_cb(identification::callback_type_t type, uin
 static esp_err_t app_attribute_update_cb(attribute::callback_type_t type, uint16_t endpoint_id, uint32_t cluster_id,
                                          uint32_t attribute_id, esp_matter_attr_val_t *val, void *priv_data)
 {
-    esp_err_t err = ESP_OK;
+    static bool updating = false;
 
     if (type == PRE_UPDATE) {
-        /* Driver update */
-        app_driver_handle_t driver_handle = (app_driver_handle_t)priv_data;
-        err = app_driver_attribute_update(driver_handle, endpoint_id, cluster_id, attribute_id, val);
+        if (!updating) {
+            updating = true;
+            app_driver_attribute_update(endpoint_id, cluster_id, attribute_id, val);
+            updating = false;
+        }
     }
 
-    return err;
+    return ESP_OK;
 }
 
 extern "C" void app_main()
@@ -145,16 +149,23 @@ extern "C" void app_main()
     ABORT_APP_ON_FAILURE(node != nullptr, ESP_LOGE(TAG, "Failed to create Matter node"));
 
 
+    // Air purifier endpoint
     air_purifier::config_t air_purifier_config;
-    // air_purifier_config.fan_control = DEFAULT_POWER;
     endpoint_t *air_purifier_endpoint = air_purifier::create(node, &air_purifier_config, ENDPOINT_FLAG_NONE, NULL);
     ABORT_APP_ON_FAILURE(air_purifier_endpoint != nullptr, ESP_LOGE(TAG, "Failed to create air purifier endpoint"));
     air_purifier_endpoint_id = endpoint::get_id(air_purifier_endpoint);
-    ESP_LOGI(TAG, "Air purifier created with endpoint_id %d", air_purifier_endpoint_id);
+    
+    // Add Multi-speed feature
+    cluster_t *fan_control_cluster = cluster::get(air_purifier_endpoint, FanControl::Id);
+    cluster::fan_control::feature::multi_speed::config_t multi_speed_config;
+    multi_speed_config.speed_max = 100;
+    cluster::fan_control::feature::multi_speed::add(fan_control_cluster, &multi_speed_config);
 
-    cluster::hepa_filter_monitoring::config_t hepa_filter_monitoring_config;
-    cluster_t *hepa_filter_monitoring_cluster = cluster::hepa_filter_monitoring::create(air_purifier_endpoint, &hepa_filter_monitoring_config, CLUSTER_FLAG_SERVER);
-    ABORT_APP_ON_FAILURE(hepa_filter_monitoring_cluster != nullptr, ESP_LOGE(TAG, "Failed to add HEPA filter monitoring cluster"));
+    // Add Automatic speed feature
+    // It has no config
+    cluster::fan_control::feature::fan_auto::add(fan_control_cluster);
+
+    ESP_LOGI(TAG, "Air purifier created with endpoint_id %d", air_purifier_endpoint_id);
 
 
 
@@ -165,19 +176,11 @@ extern "C" void app_main()
     air_quality_sensor_endpoint_id = endpoint::get_id(air_quality_sensor_endpoint);
     ESP_LOGI(TAG, "Air quality sensor created with endpoint_id %d", air_quality_sensor_endpoint_id);
 
-    cluster::pm1_concentration_measurement::config_t pm1_config;
-    cluster_t *pm1_cluster = cluster::pm1_concentration_measurement::create(air_quality_sensor_endpoint, &pm1_config, CLUSTER_FLAG_SERVER);
-    ABORT_APP_ON_FAILURE(pm1_cluster != nullptr, ESP_LOGE(TAG, "Failed to add PM1 cluster"));
-
     cluster::pm25_concentration_measurement::config_t pm25_config;
     cluster_t *pm25_cluster = cluster::pm25_concentration_measurement::create(air_quality_sensor_endpoint, &pm25_config, CLUSTER_FLAG_SERVER);
     ABORT_APP_ON_FAILURE(pm25_cluster != nullptr, ESP_LOGE(TAG, "Failed to add PM2.5 cluster"));
 
-    cluster::pm10_concentration_measurement::config_t pm10_config;
-    cluster_t *pm10_cluster = cluster::pm10_concentration_measurement::create(air_quality_sensor_endpoint, &pm10_config, CLUSTER_FLAG_SERVER);
-    ABORT_APP_ON_FAILURE(pm10_cluster != nullptr, ESP_LOGE(TAG, "Failed to add PM10 cluster"));
-    // Add temp, humidity?
-
+    app_driver_hw_init();
 
     /* Matter start */
     err = esp_matter::start(app_event_cb);

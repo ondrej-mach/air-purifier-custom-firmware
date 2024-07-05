@@ -14,7 +14,8 @@
 #include <esp_matter.h>
 #include <led_driver.h>
 
-#include <app_priv.h>
+#include <app_driver.h>
+#include <fan.h>
 
 using namespace chip::app::Clusters;
 using namespace esp_matter;
@@ -23,12 +24,6 @@ static const char *TAG = "app_driver";
 extern uint16_t air_purifier_endpoint_id;
 extern uint16_t air_quality_sensor_endpoint_id;
 
-
-/* Do any conversions/remapping for the actual value here */
-static esp_err_t app_driver_room_air_conditioner_set_power(led_driver_handle_t handle, esp_matter_attr_val_t *val)
-{
-    return led_driver_set_power(handle, val->val.b);
-}
 
 static void app_driver_button_toggle_cb(void *arg, void *data)
 {
@@ -48,29 +43,69 @@ static void app_driver_button_toggle_cb(void *arg, void *data)
     attribute::update(endpoint_id, cluster_id, attribute_id, &val);
 }
 
-esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle, uint16_t endpoint_id, uint32_t cluster_id,
-                                      uint32_t attribute_id, esp_matter_attr_val_t *val)
+
+void app_driver_update_mode(uint8_t mode)
 {
-    esp_err_t err = ESP_OK;
-    if (endpoint_id == air_purifier_endpoint_id) {
-        led_driver_handle_t handle = (led_driver_handle_t)driver_handle;
-        if (cluster_id == OnOff::Id) {
-            if (attribute_id == OnOff::Attributes::OnOff::Id) {
-                err = app_driver_room_air_conditioner_set_power(handle, val);
-            }
+    using namespace FanControl::Attributes;
+
+    uint16_t endpoint_id = air_purifier_endpoint_id;
+    uint32_t cluster_id = FanControl::Id;
+
+    esp_matter_attr_val_t val;
+    FanControl::FanModeEnum m = static_cast<FanControl::FanModeEnum>(mode);
+
+    if (m == FanControl::FanModeEnum::kOff) {
+        fan_set_power(false);
+        val = esp_matter_nullable_uint8(0);
+        attribute::update(endpoint_id, cluster_id, PercentSetting::Id, &val);
+        attribute::update(endpoint_id, cluster_id, SpeedSetting::Id, &val);
+
+        val = esp_matter_uint8(0);
+        attribute::update(endpoint_id, cluster_id, PercentCurrent::Id, &val);
+        attribute::update(endpoint_id, cluster_id, SpeedCurrent::Id, &val);
+
+    } else if (m == FanControl::FanModeEnum::kAuto) {
+        fan_set_power(true);
+        fan_set_percentage(50);
+
+        val = esp_matter_nullable_uint8(nullable<uint8_t>());
+        attribute::update(endpoint_id, cluster_id, PercentSetting::Id, &val);
+        attribute::update(endpoint_id, cluster_id, SpeedSetting::Id, &val);
+        
+        val = esp_matter_uint8(fan_get_percentage());
+        attribute::update(endpoint_id, cluster_id, PercentCurrent::Id, &val);
+        attribute::update(endpoint_id, cluster_id, SpeedCurrent::Id, &val);
+
+    } else {
+        fan_set_power(true);
+        uint8_t percentage = 0;
+        switch (m) {
+            case FanControl::FanModeEnum::kLow:
+                percentage = 10;
+                break;
+            case FanControl::FanModeEnum::kMedium:
+                percentage = 50;
+                break;
+            case FanControl::FanModeEnum::kHigh:
+                percentage = 100;
+                break;
+            default:
+                break;
         }
-    } else if (endpoint_id == air_quality_sensor_endpoint_id) {
-
-
+        
+        fan_set_percentage(percentage);
+        val = esp_matter_nullable_uint8(percentage);
+        attribute::update(endpoint_id, cluster_id, PercentSetting::Id, &val);
+        attribute::update(endpoint_id, cluster_id, SpeedSetting::Id, &val);
+        val = esp_matter_uint8(percentage);
+        attribute::update(endpoint_id, cluster_id, PercentCurrent::Id, &val);
+        attribute::update(endpoint_id, cluster_id, SpeedCurrent::Id, &val);
     }
-    return err;
 }
 
 
 void app_driver_update_air_quality()
 {
-    ESP_LOGI(TAG, "Updating air quality");
-
     uint16_t endpoint_id = air_quality_sensor_endpoint_id;
     uint32_t cluster_id = AirQuality::Id;
     uint32_t attribute_id = AirQuality::Attributes::AirQuality::Id;
@@ -85,7 +120,17 @@ void app_driver_update_air_quality()
     val.val.u8 = static_cast<uint8_t>(AirQuality::AirQualityEnum::kFair);
 
     attribute::update(endpoint_id, cluster_id, attribute_id, &val);
+    
+    val.val.u32 = 15;
+    val.type = ESP_MATTER_VAL_TYPE_UINT32;
+    attribute::update(
+        endpoint_id,
+        Pm25ConcentrationMeasurement::Id,
+        Pm25ConcentrationMeasurement::Attributes::LevelValue::Id,
+        &val
+    );
 }
+
 
 
 esp_err_t app_driver_air_purifier_set_defaults(uint16_t endpoint_id)
@@ -110,4 +155,32 @@ esp_err_t app_driver_air_purifier_set_defaults(uint16_t endpoint_id)
 */
     return err;
     
+}
+
+
+void app_driver_hw_init() {
+    fan_init();
+}
+
+esp_err_t app_driver_attribute_update(uint16_t endpoint_id, uint32_t cluster_id,
+                                      uint32_t attribute_id, esp_matter_attr_val_t *val)
+{
+    esp_err_t err = ESP_OK;
+    if (endpoint_id == air_purifier_endpoint_id) {
+        if (cluster_id == FanControl::Id) {
+            if (attribute_id == FanControl::Attributes::FanMode::Id) {
+                app_driver_update_mode(val->val.u8);
+            } else if (attribute_id == FanControl::Attributes::PercentSetting::Id) {
+                fan_set_percentage(val->val.u8);
+            } else if (attribute_id == FanControl::Attributes::SpeedSetting::Id) {
+                fan_set_percentage(val->val.u8);
+            }
+        }
+
+
+    } else if (endpoint_id == air_quality_sensor_endpoint_id) {
+
+    }
+
+    return err;
 }
