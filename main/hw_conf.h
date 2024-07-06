@@ -1,29 +1,40 @@
 #pragma once
 
-#define GPIO_RGB_R 21
-#define GPIO_RGB_G 32
-#define GPIO_RGB_B 33
+#define GPIO_RGB_R GPIO_NUM_21
+#define GPIO_RGB_G GPIO_NUM_32
+#define GPIO_RGB_B GPIO_NUM_33
 
-#define GPIO_BUZZER 4
+#define GPIO_BUZZER GPIO_NUM_4
 
 #define I2C_TOUCH_ADDR 0xFF // TODO
-#define GPIO_TOUCH_SDA 19
-#define GPIO_TOUCH_SCL 17
-#define GPIO_TOUCH_INT 5 // TODO not sure if interrupt
+#define GPIO_TOUCH_SDA GPIO_NUM_19
+#define GPIO_TOUCH_SCL GPIO_NUM_17
+#define GPIO_TOUCH_INT GPIO_NUM_5 // TODO not sure if interrupt
 
-#define GPIO_LED_SDA 14
-#define GPIO_LED_SCL 27
+#define GPIO_LED_SDA GPIO_NUM_14
+#define GPIO_LED_SCL GPIO_NUM_27
 
-#define GPIO_EEPROM_SDA 36
-#define GPIO_EEPROM_SCL 37
+#define GPIO_EEPROM_SDA GPIO_NUM_36
+#define GPIO_EEPROM_SCL GPIO_NUM_37
 
-#define GPIO_MOTOR_PWM 26 // OUT
-#define GPIO_MOTOR_BRK 2  // OUT
-#define GPIO_MOTOR_FG 34  // IN
-#define GPIO_MOTOR_5V 15  // OUT
+#define GPIO_MOTOR_PWM GPIO_NUM_26 // OUT
+#define GPIO_MOTOR_BRK GPIO_NUM_2  // OUT
+#define GPIO_MOTOR_FG GPIO_NUM_34  // IN
+#define GPIO_MOTOR_5V GPIO_NUM_15  // OUT
 
 // PS for particle sensor
-#define GPIO_PS_RX 16
-#define GPIO_PS_TX 17
-#define GPIO_PS_5V 13
+#define GPIO_PS_RX GPIO_NUM_16
+#define GPIO_PS_TX GPIO_NUM_17
+#define GPIO_PS_5V GPIO_NUM_13
+
+
+// ESP32 peripherals
+
+#define LEDC_TIMER_MOTOR_PWM LEDC_TIMER_0
+#define LEDC_TIMER_RGB LEDC_TIMER_1
+
+#define LEDC_CHANNEL_MOTOR_PWM LEDC_CHANNEL_0
+#define LEDC_CHANNEL_RGB_R LEDC_CHANNEL_1
+#define LEDC_CHANNEL_RGB_G LEDC_CHANNEL_2
+#define LEDC_CHANNEL_RGB_B LEDC_CHANNEL_3
 

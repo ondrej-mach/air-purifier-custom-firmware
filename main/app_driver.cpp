@@ -16,6 +16,7 @@
 
 #include <app_driver.h>
 #include <fan.h>
+#include <led.h>
 
 using namespace chip::app::Clusters;
 using namespace chip::app;
@@ -198,6 +199,8 @@ esp_err_t app_driver_air_purifier_set_defaults(uint16_t endpoint_id)
 
 void app_driver_hw_init() {
     fan_init();
+    led_init();
+    led_rgb_set(10, 30, 240);
 }
 
 esp_err_t app_driver_attribute_update(uint16_t endpoint_id, uint32_t cluster_id,
