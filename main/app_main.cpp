@@ -119,16 +119,9 @@ static esp_err_t app_identification_cb(identification::callback_type_t type, uin
 static esp_err_t app_attribute_update_cb(attribute::callback_type_t type, uint16_t endpoint_id, uint32_t cluster_id,
                                          uint32_t attribute_id, esp_matter_attr_val_t *val, void *priv_data)
 {
-    static bool updating = false;
-
     if (type == PRE_UPDATE) {
-        if (!updating) {
-            updating = true;
-            app_driver_attribute_update(endpoint_id, cluster_id, attribute_id, val);
-            updating = false;
-        }
+        app_driver_attribute_update(endpoint_id, cluster_id, attribute_id, val);
     }
-
     return ESP_OK;
 }
 
@@ -140,7 +133,7 @@ extern "C" void app_main()
     nvs_flash_init();
 
     /* Initialize driver */
-    // removed
+    // removed 
     //  TODO this might be useful instead of registering the button: esp_matter::factory_reset();
 
     /* Create a Matter node and add the mandatory Root Node device type on endpoint 0 */

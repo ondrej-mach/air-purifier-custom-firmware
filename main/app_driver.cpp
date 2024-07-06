@@ -18,6 +18,7 @@
 #include <fan.h>
 
 using namespace chip::app::Clusters;
+using namespace chip::app;
 using namespace esp_matter;
 
 static const char *TAG = "app_driver";
@@ -43,6 +44,46 @@ static void app_driver_button_toggle_cb(void *arg, void *data)
     attribute::update(endpoint_id, cluster_id, attribute_id, &val);
 }
 
+void app_driver_update_fan_speed(uint8_t percentage) {
+    // Hardware
+    fan_set_percentage(percentage);
+
+    // Matter DB
+    using namespace FanControl::Attributes;
+    uint16_t endpoint_id = air_purifier_endpoint_id;
+    uint32_t cluster_id = FanControl::Id;
+    
+    esp_matter_attr_val_t val;
+    val = esp_matter_nullable_uint8(percentage);
+    attribute::report(endpoint_id, cluster_id, PercentSetting::Id, &val);
+    attribute::report(endpoint_id, cluster_id, SpeedSetting::Id, &val);
+    val = esp_matter_uint8(percentage);
+    attribute::report(endpoint_id, cluster_id, PercentCurrent::Id, &val);
+    attribute::report(endpoint_id, cluster_id, SpeedCurrent::Id, &val);
+}
+
+
+void app_driver_report_fan_mode_from_percentage(uint8_t percentage) {
+    using namespace FanControl::Attributes;
+
+    uint16_t endpoint_id = air_purifier_endpoint_id;
+    uint32_t cluster_id = FanControl::Id;
+
+    esp_matter_attr_val_t val;
+    
+    if (percentage == 0) {
+        val = esp_matter_enum8(static_cast<uint8_t>(FanControl::FanModeEnum::kOff));
+    } else if (percentage <= 33) {
+        val = esp_matter_enum8(static_cast<uint8_t>(FanControl::FanModeEnum::kLow));
+    } else if (percentage <= 66) {
+        val = esp_matter_enum8(static_cast<uint8_t>(FanControl::FanModeEnum::kMedium));
+    } else {
+        val = esp_matter_enum8(static_cast<uint8_t>(FanControl::FanModeEnum::kHigh));
+    }
+    
+    attribute::report(endpoint_id, cluster_id, FanMode::Id, &val);
+}
+
 
 void app_driver_update_mode(uint8_t mode)
 {
@@ -54,54 +95,43 @@ void app_driver_update_mode(uint8_t mode)
     esp_matter_attr_val_t val;
     FanControl::FanModeEnum m = static_cast<FanControl::FanModeEnum>(mode);
 
-    if (m == FanControl::FanModeEnum::kOff) {
-        fan_set_power(false);
-        val = esp_matter_nullable_uint8(0);
-        attribute::update(endpoint_id, cluster_id, PercentSetting::Id, &val);
-        attribute::update(endpoint_id, cluster_id, SpeedSetting::Id, &val);
+    uint8_t percentage = 0;
 
-        val = esp_matter_uint8(0);
-        attribute::update(endpoint_id, cluster_id, PercentCurrent::Id, &val);
-        attribute::update(endpoint_id, cluster_id, SpeedCurrent::Id, &val);
-
-    } else if (m == FanControl::FanModeEnum::kAuto) {
-        fan_set_power(true);
-        fan_set_percentage(50);
-
-        val = esp_matter_nullable_uint8(nullable<uint8_t>());
-        attribute::update(endpoint_id, cluster_id, PercentSetting::Id, &val);
-        attribute::update(endpoint_id, cluster_id, SpeedSetting::Id, &val);
-        
-        val = esp_matter_uint8(fan_get_percentage());
-        attribute::update(endpoint_id, cluster_id, PercentCurrent::Id, &val);
-        attribute::update(endpoint_id, cluster_id, SpeedCurrent::Id, &val);
-
-    } else {
-        fan_set_power(true);
-        uint8_t percentage = 0;
-        switch (m) {
-            case FanControl::FanModeEnum::kLow:
-                percentage = 10;
-                break;
-            case FanControl::FanModeEnum::kMedium:
-                percentage = 50;
-                break;
-            case FanControl::FanModeEnum::kHigh:
-                percentage = 100;
-                break;
-            default:
-                break;
-        }
-        
+    switch (m) {
+        case FanControl::FanModeEnum::kOff:
+            percentage = 0;
+            break;
+        case FanControl::FanModeEnum::kLow:
+            percentage = 10;
+            break;
+        case FanControl::FanModeEnum::kMedium:
+            percentage = 50;
+            break;
+        case FanControl::FanModeEnum::kHigh:
+            percentage = 100;
+            break;
+        case FanControl::FanModeEnum::kAuto:
+            percentage = 42;
+            break;
+        default:
+            break;
+    }
+    
+    if (m == FanControl::FanModeEnum::kAuto) {
         fan_set_percentage(percentage);
-        val = esp_matter_nullable_uint8(percentage);
-        attribute::update(endpoint_id, cluster_id, PercentSetting::Id, &val);
-        attribute::update(endpoint_id, cluster_id, SpeedSetting::Id, &val);
-        val = esp_matter_uint8(percentage);
-        attribute::update(endpoint_id, cluster_id, PercentCurrent::Id, &val);
-        attribute::update(endpoint_id, cluster_id, SpeedCurrent::Id, &val);
+
+        uint16_t endpoint_id = air_purifier_endpoint_id;
+        uint32_t cluster_id = FanControl::Id;
+        
+        esp_matter_attr_val_t val = esp_matter_uint8(percentage);
+        attribute::report(endpoint_id, cluster_id, PercentCurrent::Id, &val);
+        attribute::report(endpoint_id, cluster_id, SpeedCurrent::Id, &val);
+    } else {
+        app_driver_update_fan_speed(percentage);
     }
 }
+
+
 
 
 void app_driver_update_air_quality()
@@ -119,16 +149,24 @@ void app_driver_update_air_quality()
     attribute::get_val(attribute, &val);
     val.val.u8 = static_cast<uint8_t>(AirQuality::AirQualityEnum::kFair);
 
-    attribute::update(endpoint_id, cluster_id, attribute_id, &val);
-    
-    val.val.u32 = 15;
+    attribute::report(endpoint_id, cluster_id, attribute_id, &val);
+    /*
+    val = esp_matter_null15;
     val.type = ESP_MATTER_VAL_TYPE_UINT32;
-    attribute::update(
+    attribute::report(
         endpoint_id,
         Pm25ConcentrationMeasurement::Id,
         Pm25ConcentrationMeasurement::Attributes::LevelValue::Id,
         &val
     );
+
+    attribute::report(
+        endpoint_id,
+        Pm25ConcentrationMeasurement::Id,
+        Pm25ConcentrationMeasurement::Attributes::MeasurementUnit,
+        &val
+    );
+    */
 }
 
 
@@ -166,17 +204,23 @@ esp_err_t app_driver_attribute_update(uint16_t endpoint_id, uint32_t cluster_id,
                                       uint32_t attribute_id, esp_matter_attr_val_t *val)
 {
     esp_err_t err = ESP_OK;
+
     if (endpoint_id == air_purifier_endpoint_id) {
         if (cluster_id == FanControl::Id) {
             if (attribute_id == FanControl::Attributes::FanMode::Id) {
                 app_driver_update_mode(val->val.u8);
-            } else if (attribute_id == FanControl::Attributes::PercentSetting::Id) {
-                fan_set_percentage(val->val.u8);
-            } else if (attribute_id == FanControl::Attributes::SpeedSetting::Id) {
-                fan_set_percentage(val->val.u8);
+            } else if (attribute_id == FanControl::Attributes::PercentSetting::Id
+                || attribute_id == FanControl::Attributes::SpeedSetting::Id) {
+
+                uint8_t percentage = val->val.u8;
+                if (NumericAttributeTraits<uint8_t>::IsNullValue(percentage)) {
+                    return err;
+                }
+
+                app_driver_update_fan_speed(percentage);
+                app_driver_report_fan_mode_from_percentage(percentage);
             }
         }
-
 
     } else if (endpoint_id == air_quality_sensor_endpoint_id) {
 

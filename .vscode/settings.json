@@ -3,7 +3,8 @@
     "idf.flashType": "UART",
     "idf.adapterTargetName": "esp32",
     "files.associations": {
-        "freertosconfig.h": "c"
+        "freertosconfig.h": "c",
+        "string": "cpp"
     },
     "C_Cpp.errorSquiggles": "disabled"
 }
