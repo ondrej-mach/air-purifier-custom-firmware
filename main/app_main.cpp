@@ -144,6 +144,8 @@ extern "C" void app_main()
 
     // Air purifier endpoint
     air_purifier::config_t air_purifier_config;
+    // Allow modes Off/Low/High/Auto
+    air_purifier_config.fan_control.fan_mode_sequence = 3;
     endpoint_t *air_purifier_endpoint = air_purifier::create(node, &air_purifier_config, ENDPOINT_FLAG_NONE, NULL);
     ABORT_APP_ON_FAILURE(air_purifier_endpoint != nullptr, ESP_LOGE(TAG, "Failed to create air purifier endpoint"));
     air_purifier_endpoint_id = endpoint::get_id(air_purifier_endpoint);
@@ -156,7 +158,7 @@ extern "C" void app_main()
 
     // Add Automatic speed feature
     // It has no config
-    cluster::fan_control::feature::fan_auto::add(fan_control_cluster);
+    // cluster::fan_control::feature::fan_auto::add(fan_control_cluster);
 
     ESP_LOGI(TAG, "Air purifier created with endpoint_id %d", air_purifier_endpoint_id);
 

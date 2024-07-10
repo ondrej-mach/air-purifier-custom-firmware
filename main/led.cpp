@@ -25,12 +25,12 @@
 #define TAG "LED"
 
 
-static uint8_t rgb_brightness;
+static uint8_t rgb_dim_bits;
+static uint8_t rgb_channels[3];
+
 
 
 void led_rgb_init() {
-    esp_err_t err;
-
     // Prepare and configure the LEDC timer
     ledc_timer_config_t ledc_timer = {
         .speed_mode = LEDC_MODE,
@@ -78,14 +78,20 @@ void led_rgb_init() {
     ledc_fade_func_install(0);
 }
 
-
-void led_rgb_set(uint32_t red, uint32_t green, uint32_t blue) {
-    ledc_set_duty(LEDC_MODE, LEDC_CHANNEL_RGB_R, red);
-    ledc_set_duty(LEDC_MODE, LEDC_CHANNEL_RGB_G, green);
-    ledc_set_duty(LEDC_MODE, LEDC_CHANNEL_RGB_B, blue);
+void led_rgb_update() {
+    ledc_set_duty(LEDC_MODE, LEDC_CHANNEL_RGB_R, rgb_channels[0] >> rgb_dim_bits);
+    ledc_set_duty(LEDC_MODE, LEDC_CHANNEL_RGB_G, rgb_channels[1] >> rgb_dim_bits);
+    ledc_set_duty(LEDC_MODE, LEDC_CHANNEL_RGB_B, rgb_channels[2] >> rgb_dim_bits);
     ledc_update_duty(LEDC_MODE, LEDC_CHANNEL_RGB_R);
     ledc_update_duty(LEDC_MODE, LEDC_CHANNEL_RGB_G);
     ledc_update_duty(LEDC_MODE, LEDC_CHANNEL_RGB_B);
+}
+
+void led_rgb_set(uint32_t ch0, uint32_t ch1, uint32_t ch2) {
+    rgb_channels[0] = ch0;
+    rgb_channels[1] = ch1;
+    rgb_channels[2] = ch2;
+    led_rgb_update();
 }
 
 
@@ -123,32 +129,32 @@ void led_status_brightness(uint8_t brightness) {
 void led_set_brightness(uint8_t level) {
     if (level == 0) {
         led_status_brightness(0);
-        led_rgb_set(0,0,0);
-        rgb_brightness = 0;
+        rgb_dim_bits = 8;
+        led_rgb_update();
         
     } else if (level == 1) {
         led_status_brightness(1);
         cms_send(BTN_POWER_BACKLIGHT, BTN_HALF_BRIGHT);
         cms_send(BTN_BRIGHTNESS_BACKLIGHT, BTN_ZERO_BRIGHT);
         cms_send(BTN_MODE_BACKLIGHT, BTN_ZERO_BRIGHT);
-        led_rgb_set(0,0,0);
-        rgb_brightness = 0;
+        rgb_dim_bits = 8;
+        led_rgb_update();
 
     } else if (level == 2) {
         led_status_brightness(1);
         cms_send(BTN_POWER_BACKLIGHT, BTN_FULL_BRIGHT);
         cms_send(BTN_BRIGHTNESS_BACKLIGHT, BTN_FULL_BRIGHT);
         cms_send(BTN_MODE_BACKLIGHT, BTN_FULL_BRIGHT);
-        // led_rgb_set(0,0,0);
-        rgb_brightness = 64;
+        rgb_dim_bits = 2;
+        led_rgb_update();
 
     } else if (level == 3) {
-        led_status_brightness(1);
+        led_status_brightness(8);
         cms_send(BTN_POWER_BACKLIGHT, BTN_FULL_BRIGHT);
         cms_send(BTN_BRIGHTNESS_BACKLIGHT, BTN_FULL_BRIGHT);
         cms_send(BTN_MODE_BACKLIGHT, BTN_FULL_BRIGHT);
-        // led_rgb_set(0,0,0);
-        rgb_brightness = 255;
+        rgb_dim_bits = 0;
+        led_rgb_update();
     }
 }
 
