@@ -188,4 +188,6 @@ extern "C" void app_main()
     esp_matter::console::wifi_register_commands();
     esp_matter::console::init();
 #endif
+
+    app_driver_event_loop();
 }

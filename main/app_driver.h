@@ -68,3 +68,4 @@ void app_driver_update_air_quality();
 
 void app_driver_hw_init();
 
+void app_driver_event_loop();

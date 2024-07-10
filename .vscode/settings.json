@@ -4,7 +4,10 @@
     "idf.adapterTargetName": "esp32",
     "files.associations": {
         "freertosconfig.h": "c",
-        "string": "cpp"
+        "string": "cpp",
+        "numeric": "cpp",
+        "ostream": "cpp",
+        "print": "cpp"
     },
     "C_Cpp.errorSquiggles": "disabled"
 }

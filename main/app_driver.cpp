@@ -17,33 +17,37 @@
 #include <app_driver.h>
 #include <fan.h>
 #include <led.h>
+#include "buttons.h"
 
 using namespace chip::app::Clusters;
 using namespace chip::app;
 using namespace esp_matter;
 
+
 static const char *TAG = "app_driver";
 extern uint16_t air_purifier_endpoint_id;
 extern uint16_t air_quality_sensor_endpoint_id;
 
+// Things that are not handled by matter database
+struct State {
+    // legal values are 1, 2, 3
+    uint8_t brightness = 3;
+    // stores the previous state while the fan is off
+    FanControl::FanModeEnum prev_mode = FanControl::FanModeEnum::kHigh;
+    // Stores the previous percentage setting while the fan is off
+    // When turning on, percentage takes precedence over mode (except when 0)
+    uint8_t prev_percentage = 0;
+};
 
-static void app_driver_button_toggle_cb(void *arg, void *data)
-{
-    ESP_LOGI(TAG, "Toggle button pressed");
-    uint16_t endpoint_id = air_purifier_endpoint_id;
-    uint32_t cluster_id = OnOff::Id;
-    uint32_t attribute_id = OnOff::Attributes::OnOff::Id;
 
-    node_t *node = node::get();
-    endpoint_t *endpoint = endpoint::get(node, endpoint_id);
-    cluster_t *cluster = cluster::get(endpoint, cluster_id);
-    attribute_t *attribute = attribute::get(cluster, attribute_id);
+static State state;
 
-    esp_matter_attr_val_t val = esp_matter_invalid(NULL);
-    attribute::get_val(attribute, &val);
-    val.val.b = !val.val.b;
-    attribute::update(endpoint_id, cluster_id, attribute_id, &val);
-}
+
+void app_driver_update_fan_speed(uint8_t percentage);
+
+void app_driver_report_fan_mode_from_percentage(uint8_t percentage);
+
+
 
 void app_driver_update_fan_speed(uint8_t percentage) {
     // Hardware
@@ -61,6 +65,28 @@ void app_driver_update_fan_speed(uint8_t percentage) {
     val = esp_matter_uint8(percentage);
     attribute::report(endpoint_id, cluster_id, PercentCurrent::Id, &val);
     attribute::report(endpoint_id, cluster_id, SpeedCurrent::Id, &val);
+
+    app_driver_report_fan_mode_from_percentage(percentage);
+
+    // State outside of matter db
+    state.prev_percentage = percentage;
+}
+
+
+void app_driver_show_mode(FanControl::FanModeEnum mode) {
+    if (mode == FanControl::FanModeEnum::kOff) {
+        led_set_brightness(0);
+    } 
+    else {
+        led_set_brightness(state.brightness);
+        if (mode == FanControl::FanModeEnum::kHigh) {
+            led_status_set_indicators(LED_IND_HEART);
+        } else if (mode == FanControl::FanModeEnum::kLow) {
+            led_status_set_indicators(LED_IND_NIGHT);
+        } else if (mode == FanControl::FanModeEnum::kAuto) {
+            led_status_set_indicators(LED_IND_AUTO);
+        }
+    }
 }
 
 
@@ -71,19 +97,21 @@ void app_driver_report_fan_mode_from_percentage(uint8_t percentage) {
     uint32_t cluster_id = FanControl::Id;
 
     esp_matter_attr_val_t val;
+    FanControl::FanModeEnum mode;
     
     if (percentage == 0) {
-        val = esp_matter_enum8(static_cast<uint8_t>(FanControl::FanModeEnum::kOff));
-    } else if (percentage <= 33) {
-        val = esp_matter_enum8(static_cast<uint8_t>(FanControl::FanModeEnum::kLow));
-    } else if (percentage <= 66) {
-        val = esp_matter_enum8(static_cast<uint8_t>(FanControl::FanModeEnum::kMedium));
+        mode = FanControl::FanModeEnum::kOff;
+    } else if (percentage <= 30) {
+        mode = FanControl::FanModeEnum::kLow;
     } else {
-        val = esp_matter_enum8(static_cast<uint8_t>(FanControl::FanModeEnum::kHigh));
+        mode = FanControl::FanModeEnum::kHigh;
     }
     
+    val = esp_matter_enum8(static_cast<uint8_t>(mode));
     attribute::report(endpoint_id, cluster_id, FanMode::Id, &val);
+    app_driver_show_mode(mode);
 }
+
 
 
 void app_driver_update_mode(uint8_t mode)
@@ -103,10 +131,7 @@ void app_driver_update_mode(uint8_t mode)
             percentage = 0;
             break;
         case FanControl::FanModeEnum::kLow:
-            percentage = 10;
-            break;
-        case FanControl::FanModeEnum::kMedium:
-            percentage = 50;
+            percentage = 20;
             break;
         case FanControl::FanModeEnum::kHigh:
             percentage = 100;
@@ -119,14 +144,18 @@ void app_driver_update_mode(uint8_t mode)
     }
     
     if (m == FanControl::FanModeEnum::kAuto) {
+        // Set hardware
         fan_set_percentage(percentage);
+        app_driver_show_mode(m);
 
-        uint16_t endpoint_id = air_purifier_endpoint_id;
-        uint32_t cluster_id = FanControl::Id;
-        
+        // save to matter DB  
         esp_matter_attr_val_t val = esp_matter_uint8(percentage);
         attribute::report(endpoint_id, cluster_id, PercentCurrent::Id, &val);
         attribute::report(endpoint_id, cluster_id, SpeedCurrent::Id, &val);
+
+        // save to state
+        state.prev_mode = FanControl::FanModeEnum::kAuto;
+        state.prev_percentage = 0;
     } else {
         app_driver_update_fan_speed(percentage);
     }
@@ -196,11 +225,75 @@ esp_err_t app_driver_air_purifier_set_defaults(uint16_t endpoint_id)
     
 }
 
+void app_driver_buttons_callback(uint8_t button) {
+    using namespace FanControl::Attributes;
+
+    uint16_t endpoint_id = air_purifier_endpoint_id;
+    uint32_t cluster_id = FanControl::Id;
+    uint32_t attribute_id = FanControl::Attributes::FanMode::Id;
+
+    node_t *node = node::get();
+    endpoint_t *endpoint = endpoint::get(node, endpoint_id);
+    cluster_t *cluster = cluster::get(endpoint, cluster_id);
+    attribute_t *attribute = attribute::get(cluster, attribute_id);
+
+    esp_matter_attr_val_t val;
+    attribute::get_val(attribute, &val);
+    FanControl::FanModeEnum mode = static_cast<FanControl::FanModeEnum>(val.val.u8);
+
+    if (mode == FanControl::FanModeEnum::kOff) {
+        if (button == BUTTON_POWER) {
+            // buzzer_beep();
+            if (state.prev_percentage == 0) {
+                val = esp_matter_enum8(static_cast<uint8_t>(state.prev_mode));
+                attribute::update(endpoint_id, cluster_id, attribute_id, &val);
+            } else {
+                val = esp_matter_uint8(state.prev_percentage);
+            }
+            
+        }
+    } else {
+        // buzzer_beep();
+        if (state.brightness == 1) {
+            state.brightness = 3;
+            led_set_brightness(state.brightness);
+        
+        } else {
+            if (button == BUTTON_POWER) {
+                val = esp_matter_enum8(static_cast<uint8_t>(FanControl::FanModeEnum::kOff));
+                attribute::update(endpoint_id, cluster_id, attribute_id, &val);
+
+            } else if (button == BUTTON_BRIGHTNESS) {
+                if (state.brightness == 3) {
+                    state.brightness = 2;
+                } else if (state.brightness == 2) {
+                    state.brightness = 1;
+                }
+                led_set_brightness(state.brightness);
+
+            } else if (button == BUTTON_MODE) {
+                // High -> Low -> Auto
+                if (mode == FanControl::FanModeEnum::kHigh) {
+                    val = esp_matter_enum8(static_cast<uint8_t>(FanControl::FanModeEnum::kLow));
+                } else if (mode == FanControl::FanModeEnum::kLow) {
+                    val = esp_matter_enum8(static_cast<uint8_t>(FanControl::FanModeEnum::kAuto));
+                } else {
+                    val = esp_matter_enum8(static_cast<uint8_t>(FanControl::FanModeEnum::kHigh));
+                }
+                attribute::update(endpoint_id, cluster_id, attribute_id, &val);
+            }
+        }
+    }
+}
+
 
 void app_driver_hw_init() {
     fan_init();
     led_init();
+    buttons_init(xTaskGetCurrentTaskHandle());
 }
+
+
 
 esp_err_t app_driver_attribute_update(uint16_t endpoint_id, uint32_t cluster_id,
                                       uint32_t attribute_id, esp_matter_attr_val_t *val)
@@ -211,6 +304,7 @@ esp_err_t app_driver_attribute_update(uint16_t endpoint_id, uint32_t cluster_id,
         if (cluster_id == FanControl::Id) {
             if (attribute_id == FanControl::Attributes::FanMode::Id) {
                 app_driver_update_mode(val->val.u8);
+
             } else if (attribute_id == FanControl::Attributes::PercentSetting::Id
                 || attribute_id == FanControl::Attributes::SpeedSetting::Id) {
 
@@ -220,7 +314,7 @@ esp_err_t app_driver_attribute_update(uint16_t endpoint_id, uint32_t cluster_id,
                 }
 
                 app_driver_update_fan_speed(percentage);
-                app_driver_report_fan_mode_from_percentage(percentage);
+                
             }
         }
 
@@ -229,4 +323,13 @@ esp_err_t app_driver_attribute_update(uint16_t endpoint_id, uint32_t cluster_id,
     }
 
     return err;
+}
+
+
+void app_driver_event_loop() {
+    while(1) {
+        uint8_t button = (uint8_t)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        app_driver_buttons_callback(button);
+        ESP_LOGI(TAG, "Button pressed (value: %i)", button);
+    }
 }
