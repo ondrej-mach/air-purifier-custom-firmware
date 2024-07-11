@@ -6,19 +6,23 @@
    CONDITIONS OF ANY KIND, either express or implied.
 */
 
+#include <led_driver.h>
+#include <app_driver.h>
+#include <fan.h>
+#include <led.h>
+#include "buttons.h"
+#include "buzzer.h"
+
 #include <esp_log.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <device.h>
 #include <esp_matter.h>
-#include <led_driver.h>
 
-#include <app_driver.h>
-#include <fan.h>
-#include <led.h>
-#include "buttons.h"
-#include "buzzer.h"
+#include <esp_wifi.h>
+#include <esp_event.h>
+
 
 using namespace chip::app::Clusters;
 using namespace chip::app;
@@ -28,6 +32,8 @@ using namespace esp_matter;
 static const char *TAG = "app_driver";
 extern uint16_t air_purifier_endpoint_id;
 extern uint16_t air_quality_sensor_endpoint_id;
+
+extern bool device_commisioning;
 
 // Things that are not handled by matter database
 struct State {
@@ -71,7 +77,9 @@ void app_driver_update_fan_speed(uint8_t percentage) {
     attribute::report(endpoint_id, cluster_id, SpeedCurrent::Id, &val);
 
     // State outside of matter db
-    state.prev_percentage = percentage;
+    if (percentage != 0) {
+        state.prev_percentage = percentage;
+    }
 }
 
 
@@ -81,12 +89,13 @@ void app_driver_show_mode(FanControl::FanModeEnum mode) {
     } 
     else {
         led_set_brightness(state.brightness);
+        led_status_set_off(LED_IND_HEART | LED_IND_NIGHT | LED_IND_AUTO);
         if (mode == FanControl::FanModeEnum::kHigh) {
-            led_status_set_indicators(LED_IND_HEART);
+            led_status_set_on(LED_IND_HEART);
         } else if (mode == FanControl::FanModeEnum::kLow) {
-            led_status_set_indicators(LED_IND_NIGHT);
+            led_status_set_on(LED_IND_NIGHT);
         } else if (mode == FanControl::FanModeEnum::kAuto) {
-            led_status_set_indicators(LED_IND_AUTO);
+            led_status_set_on(LED_IND_AUTO);
         }
     }
 }
@@ -291,11 +300,33 @@ void app_driver_buttons_callback(uint8_t button) {
 }
 
 
+void wireless_monitor_task(void *pvParameters) {
+    while (1) {
+        // Check Wi-Fi connection status
+        wifi_ap_record_t ap_info;
+        if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+            led_status_set_on(LED_IND_WIFI);
+        } else {
+            if (device_commisioning) {
+                led_status_set_blink(LED_IND_WIFI);
+            } else {
+                led_status_set_off(LED_IND_WIFI);
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+
 void app_driver_hw_init() {
     fan_init();
     led_init();
     buzzer_init();
-    buttons_init(xTaskGetCurrentTaskHandle());
+    buttons_init();
+    xTaskCreate(&wireless_monitor_task, "wireless_monitor", 4096, NULL, 5, NULL);
+
+    led_set_brightness(0);
+    led_rgb_set(0,0,255);
 }
 
 
@@ -332,9 +363,26 @@ esp_err_t app_driver_attribute_update(uint16_t endpoint_id, uint32_t cluster_id,
 
 
 void app_driver_event_loop() {
-    while (1) {
-        uint8_t button = (uint8_t)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        app_driver_buttons_callback(button);
-        ESP_LOGI(TAG, "Button pressed (value: %i)", button);
+    ButtonEvent event;
+    while (xQueueReceive(button_queue, &event, portMAX_DELAY) == pdPASS) {
+        ESP_LOGI(TAG, "Button pressed (pin: %i, longPress: %i)", event.pin, event.longPress);
+
+        if (event.longPress == false) {
+            app_driver_buttons_callback(event.pin);
+        } else {
+            if (event.pin == BUTTON_BRIGHTNESS) {
+                led_set_brightness(3);
+                buzzer_beep();
+
+                for (int i=0; i<3; i++) {
+                    led_rgb_set(255,0,0);
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                    led_rgb_set(0,0,0);
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                }
+                
+                esp_matter::factory_reset();
+            }
+        }
     }
-}
+} 

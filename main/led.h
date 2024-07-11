@@ -18,4 +18,8 @@ void led_rgb_fade(uint32_t red, uint32_t green, uint32_t blue, int fade_time_ms)
 
 void led_set_brightness(uint8_t level);
 
-void led_status_set_indicators(uint8_t indicators);
+void led_status_set_on(uint8_t mask);
+
+void led_status_set_blink(uint8_t mask);
+
+void led_status_set_off(uint8_t mask);

@@ -34,6 +34,8 @@ using namespace chip::app::Clusters;
 
 constexpr auto k_timeout_seconds = 300;
 
+bool device_commisioning;
+
 static void app_event_cb(const ChipDeviceEvent *event, intptr_t arg)
 {
     switch (event->Type) {
@@ -59,10 +61,12 @@ static void app_event_cb(const ChipDeviceEvent *event, intptr_t arg)
 
     case chip::DeviceLayer::DeviceEventType::kCommissioningWindowOpened:
         ESP_LOGI(TAG, "Commissioning window opened");
+        device_commisioning = 1;
         break;
 
     case chip::DeviceLayer::DeviceEventType::kCommissioningWindowClosed:
         ESP_LOGI(TAG, "Commissioning window closed");
+        device_commisioning = 0;
         break;
 
     case chip::DeviceLayer::DeviceEventType::kFabricRemoved:

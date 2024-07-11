@@ -28,7 +28,13 @@
 static uint8_t rgb_dim_bits;
 static uint8_t rgb_channels[3];
 
-
+static uint8_t status_on_mask;
+static uint8_t status_blink_mask;
+// Only for optimization
+static uint8_t status_current;
+// Changes with blinking leds
+static volatile bool blink_cycle_on;
+static volatile bool status_indicators_enabled;
 
 void led_rgb_init() {
     // Prepare and configure the LEDC timer
@@ -125,6 +131,40 @@ void led_status_brightness(uint8_t brightness) {
     cms_send(0x48, cmd);
 }
 
+
+void led_status_show() {
+    uint8_t current_indicators = 0;
+    if (status_indicators_enabled) {
+        current_indicators = status_on_mask;
+        if (blink_cycle_on) {
+            current_indicators |= status_blink_mask;
+        }
+    }
+    // Send only if needed
+    if (current_indicators != status_current) {
+        cms_send(0x68, current_indicators);
+        status_current = current_indicators;
+    }
+}
+
+void led_status_set_on(uint8_t mask) {
+    status_on_mask |= mask;
+    led_status_show();
+}
+
+void led_status_set_blink(uint8_t mask) {
+    // If the indicator should blink, it cannot be in the on mask
+    status_on_mask &= ~mask;
+    status_blink_mask |= mask;
+    led_status_show();
+}
+
+void led_status_set_off(uint8_t mask) {
+    status_on_mask &= ~mask;
+    status_blink_mask &= ~mask;
+    led_status_show();
+}
+
 // level 0 (off), 1 (only power button), 2 (everything but dim), 3 (everything max brightness)
 void led_set_brightness(uint8_t level) {
     if (level == 0) {
@@ -134,6 +174,8 @@ void led_set_brightness(uint8_t level) {
         
     } else if (level == 1) {
         led_status_brightness(1);
+        status_indicators_enabled = false;
+        led_status_show();
         cms_send(BTN_POWER_BACKLIGHT, BTN_HALF_BRIGHT);
         cms_send(BTN_BRIGHTNESS_BACKLIGHT, BTN_ZERO_BRIGHT);
         cms_send(BTN_MODE_BACKLIGHT, BTN_ZERO_BRIGHT);
@@ -142,6 +184,8 @@ void led_set_brightness(uint8_t level) {
 
     } else if (level == 2) {
         led_status_brightness(1);
+        status_indicators_enabled = true;
+        led_status_show();
         cms_send(BTN_POWER_BACKLIGHT, BTN_FULL_BRIGHT);
         cms_send(BTN_BRIGHTNESS_BACKLIGHT, BTN_FULL_BRIGHT);
         cms_send(BTN_MODE_BACKLIGHT, BTN_FULL_BRIGHT);
@@ -150,6 +194,8 @@ void led_set_brightness(uint8_t level) {
 
     } else if (level == 3) {
         led_status_brightness(8);
+        status_indicators_enabled = true;
+        led_status_show();
         cms_send(BTN_POWER_BACKLIGHT, BTN_FULL_BRIGHT);
         cms_send(BTN_BRIGHTNESS_BACKLIGHT, BTN_FULL_BRIGHT);
         cms_send(BTN_MODE_BACKLIGHT, BTN_FULL_BRIGHT);
@@ -158,8 +204,17 @@ void led_set_brightness(uint8_t level) {
     }
 }
 
-void led_status_set_indicators(uint8_t indicators) {
-    cms_send(0x68, indicators);
+
+void blink_task(void *pvParameters) {
+    while (1) {
+        blink_cycle_on = true;
+        led_status_show();
+        vTaskDelay(pdMS_TO_TICKS(750));
+
+        blink_cycle_on = false;
+        led_status_show();
+        vTaskDelay(pdMS_TO_TICKS(750));
+    }
 }
 
 void led_status_init() {
@@ -172,17 +227,12 @@ void led_status_init() {
     };
     i2c_param_config(I2C_NUM_0, &conf);
     i2c_driver_install(I2C_NUM_0, conf.mode, 0, 0, 0);
-}
 
-// Brightness 0 to 8, 0 is off
+    xTaskCreate(blink_task, "blink_task", 1024, NULL, 5, NULL);
+}
 
 
 void led_init() {
     led_rgb_init();
     led_status_init();
-
-
-    led_set_brightness(3);
-    led_status_set_indicators(LED_IND_WIFI);
-    led_rgb_set(0,0,255);
 }
