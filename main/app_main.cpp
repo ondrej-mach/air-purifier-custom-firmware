@@ -34,6 +34,7 @@ using namespace chip::app::Clusters;
 
 constexpr auto k_timeout_seconds = 300;
 
+// Used for wireless status LED
 bool device_commisioning;
 
 static void app_event_cb(const ChipDeviceEvent *event, intptr_t arg)
@@ -136,15 +137,13 @@ extern "C" void app_main()
     /* Initialize the ESP NVS layer */
     nvs_flash_init();
 
-    /* Initialize driver */
-    // removed 
-    //  TODO this might be useful instead of registering the button: esp_matter::factory_reset();
+    // Initialize hardware
+    app_driver_hw_init();
 
     /* Create a Matter node and add the mandatory Root Node device type on endpoint 0 */
     node::config_t node_config;
     node_t *node = node::create(&node_config, app_attribute_update_cb, app_identification_cb);
     ABORT_APP_ON_FAILURE(node != nullptr, ESP_LOGE(TAG, "Failed to create Matter node"));
-
 
     // Air purifier endpoint
     air_purifier::config_t air_purifier_config;
@@ -159,14 +158,7 @@ extern "C" void app_main()
     cluster::fan_control::feature::multi_speed::config_t multi_speed_config;
     multi_speed_config.speed_max = 100;
     cluster::fan_control::feature::multi_speed::add(fan_control_cluster, &multi_speed_config);
-
-    // Add Automatic speed feature
-    // It has no config
-    // cluster::fan_control::feature::fan_auto::add(fan_control_cluster);
-
     ESP_LOGI(TAG, "Air purifier created with endpoint_id %d", air_purifier_endpoint_id);
-
-
 
     // Add air quality sensor endpoint
     air_quality_sensor::config_t air_quality_sensor_config;
@@ -175,19 +167,13 @@ extern "C" void app_main()
     air_quality_sensor_endpoint_id = endpoint::get_id(air_quality_sensor_endpoint);
     ESP_LOGI(TAG, "Air quality sensor created with endpoint_id %d", air_quality_sensor_endpoint_id);
 
-    cluster::pm25_concentration_measurement::config_t pm25_config;
-    cluster_t *pm25_cluster = cluster::pm25_concentration_measurement::create(air_quality_sensor_endpoint, &pm25_config, CLUSTER_FLAG_SERVER);
-    ABORT_APP_ON_FAILURE(pm25_cluster != nullptr, ESP_LOGE(TAG, "Failed to add PM2.5 cluster"));
-
-    app_driver_hw_init();
 
     /* Matter start */
     err = esp_matter::start(app_event_cb);
     ABORT_APP_ON_FAILURE(err == ESP_OK, ESP_LOGE(TAG, "Failed to start Matter, err:%d", err));
 
     /* Starting driver with default values */
-    app_driver_air_purifier_set_defaults(air_purifier_endpoint_id);
-    app_driver_update_air_quality();
+    app_driver_set_defaults();
 
 #if CONFIG_ENABLE_CHIP_SHELL
     esp_matter::console::diagnostics_register_commands();
@@ -195,5 +181,6 @@ extern "C" void app_main()
     esp_matter::console::init();
 #endif
 
+    // Handle the buttons
     app_driver_event_loop();
 }

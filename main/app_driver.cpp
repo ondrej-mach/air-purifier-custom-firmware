@@ -12,6 +12,7 @@
 #include <led.h>
 #include "buttons.h"
 #include "buzzer.h"
+#include "pms.h"
 
 #include <esp_log.h>
 #include <stdlib.h>
@@ -19,9 +20,15 @@
 
 #include <device.h>
 #include <esp_matter.h>
+#include <esp_matter_cluster.h>
 
 #include <esp_wifi.h>
 #include <esp_event.h>
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
+
 
 
 using namespace chip::app::Clusters;
@@ -35,6 +42,9 @@ extern uint16_t air_quality_sensor_endpoint_id;
 
 extern bool device_commisioning;
 
+static QueueHandle_t air_quality_queue;
+
+
 // Things that are not handled by matter database
 struct State {
     // legal values are 1, 2, 3
@@ -44,7 +54,10 @@ struct State {
     // Stores the previous percentage setting while the fan is off
     // When turning on, percentage takes precedence over mode (except when 0)
     uint8_t prev_percentage = 0;
+    uint8_t current_auto_percentage = 30;
+    bool auto_mode = false;
 };
+SemaphoreHandle_t state_mutex;
 
 
 static State state;
@@ -69,9 +82,6 @@ void app_driver_update_fan_speed(uint8_t percentage) {
     uint32_t cluster_id = FanControl::Id;
     
     esp_matter_attr_val_t val;
-    val = esp_matter_nullable_uint8(percentage);
-    attribute::report(endpoint_id, cluster_id, PercentSetting::Id, &val);
-    attribute::report(endpoint_id, cluster_id, SpeedSetting::Id, &val);
     val = esp_matter_uint8(percentage);
     attribute::report(endpoint_id, cluster_id, PercentCurrent::Id, &val);
     attribute::report(endpoint_id, cluster_id, SpeedCurrent::Id, &val);
@@ -80,6 +90,7 @@ void app_driver_update_fan_speed(uint8_t percentage) {
     if (percentage != 0) {
         state.prev_percentage = percentage;
     }
+    state.auto_mode = false;
 }
 
 
@@ -150,12 +161,12 @@ void app_driver_update_mode(uint8_t mode)
             percentage = 100;
             break;
         case FanControl::FanModeEnum::kAuto:
-            percentage = 42;
+            percentage = state.current_auto_percentage;
             break;
         default:
             break;
     }
-    
+
     if (m == FanControl::FanModeEnum::kAuto) {
         // Set hardware
         fan_set_percentage(percentage);
@@ -169,74 +180,12 @@ void app_driver_update_mode(uint8_t mode)
         // save to state
         state.prev_mode = FanControl::FanModeEnum::kAuto;
         state.prev_percentage = 0;
+        state.auto_mode = true;
     } else {
         app_driver_update_fan_speed(percentage);
     }
 }
 
-
-
-
-void app_driver_update_air_quality()
-{
-    uint16_t endpoint_id = air_quality_sensor_endpoint_id;
-    uint32_t cluster_id = AirQuality::Id;
-    uint32_t attribute_id = AirQuality::Attributes::AirQuality::Id;
-
-    node_t *node = node::get();
-    endpoint_t *endpoint = endpoint::get(node, endpoint_id);
-    cluster_t *cluster = cluster::get(endpoint, cluster_id);
-    attribute_t *attribute = attribute::get(cluster, attribute_id);
-
-    esp_matter_attr_val_t val = esp_matter_invalid(NULL);
-    attribute::get_val(attribute, &val);
-    val.val.u8 = static_cast<uint8_t>(AirQuality::AirQualityEnum::kFair);
-
-    attribute::report(endpoint_id, cluster_id, attribute_id, &val);
-    /*
-    val = esp_matter_null15;
-    val.type = ESP_MATTER_VAL_TYPE_UINT32;
-    attribute::report(
-        endpoint_id,
-        Pm25ConcentrationMeasurement::Id,
-        Pm25ConcentrationMeasurement::Attributes::LevelValue::Id,
-        &val
-    );
-
-    attribute::report(
-        endpoint_id,
-        Pm25ConcentrationMeasurement::Id,
-        Pm25ConcentrationMeasurement::Attributes::MeasurementUnit,
-        &val
-    );
-    */
-}
-
-
-
-esp_err_t app_driver_air_purifier_set_defaults(uint16_t endpoint_id)
-{
-    
-    esp_err_t err = ESP_OK;
-    /*  Not really important
-    void *priv_data = endpoint::get_priv_data(endpoint_id);
-    led_driver_handle_t handle = (led_driver_handle_t)priv_data;
-    node_t *node = node::get();
-    endpoint_t *endpoint = endpoint::get(node, endpoint_id);
-    cluster_t *cluster = NULL;
-    attribute_t *attribute = NULL;
-    esp_matter_attr_val_t val = esp_matter_invalid(NULL);
-
-    // Setting power
-    cluster = cluster::get(endpoint, OnOff::Id);
-    attribute = attribute::get(cluster, OnOff::Attributes::OnOff::Id);
-    attribute::get_val(attribute, &val);
-    err |= app_driver_room_air_conditioner_set_power(handle, &val);
-
-*/
-    return err;
-    
-}
 
 void app_driver_buttons_callback(uint8_t button) {
     using namespace FanControl::Attributes;
@@ -249,10 +198,10 @@ void app_driver_buttons_callback(uint8_t button) {
     node_t *node = node::get();
     endpoint_t *endpoint = endpoint::get(node, endpoint_id);
     cluster_t *cluster = cluster::get(endpoint, cluster_id);
-    attribute_t *attribute = attribute::get(cluster, mode_attr_id);
+    attribute_t *mode_attr = attribute::get(cluster, mode_attr_id);
 
     esp_matter_attr_val_t val;
-    attribute::get_val(attribute, &val);
+    attribute::get_val(mode_attr, &val);
     FanControl::FanModeEnum mode = static_cast<FanControl::FanModeEnum>(val.val.u8);
 
     if (mode == FanControl::FanModeEnum::kOff) {
@@ -317,18 +266,140 @@ void wireless_monitor_task(void *pvParameters) {
     }
 }
 
+uint8_t aq_enum_to_motor_percentage(uint8_t aq_enum) {
+    using namespace AirQuality;
+
+    if (aq_enum == static_cast<uint8_t>(AirQualityEnum::kGood)) {
+        return AUTO_GOOD_PERCENT;
+    }
+    if (aq_enum == static_cast<uint8_t>(AirQualityEnum::kFair)) {
+        return AUTO_FAIR_PERCENT;
+    }
+    if (aq_enum == static_cast<uint8_t>(AirQualityEnum::kModerate)) {
+        return AUTO_MODERATE_PERCENT;
+    }
+    if (aq_enum == static_cast<uint8_t>(AirQualityEnum::kPoor)) {
+        return AUTO_POOR_PERCENT;
+    }
+    if (aq_enum == static_cast<uint8_t>(AirQualityEnum::kVeryPoor)) {
+        return AUTO_VPOOR_PERCENT;
+    }
+    if (aq_enum == static_cast<uint8_t>(AirQualityEnum::kExtremelyPoor)) {
+        return AUTO_XPOOR_PERCENT;
+    }
+    return AUTO_UNKNOWN_PERCENT;
+}
+
+void aq_enum_set_rgb(uint8_t aq_enum) {
+    using namespace AirQuality;
+
+    switch (static_cast<AirQualityEnum>(aq_enum)) {
+        case AirQualityEnum::kGood:
+            led_rgb_set(255, 0, 0);
+            break;
+        case AirQualityEnum::kFair:
+            // yellow
+            led_rgb_set(64, 192, 0);
+            break;
+        case AirQualityEnum::kModerate:
+            // light orange
+            led_rgb_set(16, 239, 0);
+            break;
+        case AirQualityEnum::kPoor:
+            // deep orange
+            led_rgb_set(0, 255, 0);
+            break;
+        case AirQualityEnum::kVeryPoor:
+            led_rgb_set(0, 128, 128);
+            break;
+        case AirQualityEnum::kExtremelyPoor:
+            // deep red
+            led_rgb_set(0, 0, 255);
+            break;
+        default:
+            led_rgb_set(0, 0, 0);
+    }
+
+    if (aq_enum == static_cast<uint8_t>(AirQualityEnum::kUnknown)) {
+        led_status_set_on(LED_IND_WARNING);
+    } else {
+        led_status_set_off(LED_IND_WARNING);
+    }
+}
+
+
+void auto_controller_task(void *pvParameters) {
+    using namespace FanControl::Attributes;
+
+    static aq_queue_item_t air_quality_item;
+    esp_matter_attr_val_t val;
+
+    while (1) {
+        if (xQueueReceive(air_quality_queue, &air_quality_item, portMAX_DELAY) == pdPASS) {
+            // Report enum value
+            val = esp_matter_enum8(air_quality_item.air_quality_enum);
+            attribute::report(air_quality_sensor_endpoint_id, AirQuality::Id, AirQuality::Attributes::AirQuality::Id, &val);
+            aq_enum_set_rgb(air_quality_item.air_quality_enum);
+
+            if (xSemaphoreTake(state_mutex, portMAX_DELAY)) {
+                uint8_t percentage = aq_enum_to_motor_percentage(air_quality_item.air_quality_enum);
+
+                state.current_auto_percentage = percentage;
+                if (state.auto_mode) {
+                    // Set hardware
+                    fan_set_percentage(percentage);
+                    // report motor percentage to matter DB
+                    val = esp_matter_uint8(percentage);
+                    attribute::report(air_purifier_endpoint_id, FanControl::Id, PercentCurrent::Id, &val);
+                    attribute::report(air_purifier_endpoint_id, FanControl::Id, SpeedCurrent::Id, &val);
+                }
+                xSemaphoreGive(state_mutex);
+            }
+        }
+    }
+}
+
 
 void app_driver_hw_init() {
+    state_mutex = xSemaphoreCreateMutex();
+    air_quality_queue = xQueueCreate(1, sizeof(aq_queue_item_t));
+
     fan_init();
     led_init();
     buzzer_init();
     buttons_init();
+    pms_init(air_quality_queue);
     xTaskCreate(&wireless_monitor_task, "wireless_monitor", 4096, NULL, 5, NULL);
-
-    led_set_brightness(0);
-    led_rgb_set(0,0,255);
+    xTaskCreate(&auto_controller_task, "auto_controller", 4096, NULL, 5, NULL);
 }
 
+void app_driver_set_defaults() {
+    using namespace FanControl::Attributes;
+
+    uint16_t endpoint_id = air_purifier_endpoint_id;
+    uint32_t cluster_id = FanControl::Id;
+    uint32_t mode_attr_id = FanControl::Attributes::FanMode::Id;
+    uint32_t speed_attr_id = FanControl::Attributes::SpeedSetting::Id;
+
+    node_t *node = node::get();
+    endpoint_t *endpoint = endpoint::get(node, endpoint_id);
+    cluster_t *cluster = cluster::get(endpoint, cluster_id);
+    attribute_t *mode_attr = attribute::get(cluster, mode_attr_id);
+    attribute_t *speed_attr = attribute::get(cluster, speed_attr_id);
+
+    esp_matter_attr_val_t val;
+    attribute::get_val(mode_attr, &val);
+    FanControl::FanModeEnum mode = static_cast<FanControl::FanModeEnum>(val.val.u8);
+
+    attribute::get_val(speed_attr, &val);
+    uint8_t speed = val.val.u8;
+
+    if (mode == FanControl::FanModeEnum::kAuto) {
+        app_driver_update_mode(static_cast<uint8_t>(mode));
+    } else {
+        app_driver_update_fan_speed(speed);
+    }
+}
 
 
 esp_err_t app_driver_attribute_update(uint16_t endpoint_id, uint32_t cluster_id,
@@ -350,12 +421,8 @@ esp_err_t app_driver_attribute_update(uint16_t endpoint_id, uint32_t cluster_id,
                 }
 
                 app_driver_update_fan_speed(percentage);
-                
             }
         }
-
-    } else if (endpoint_id == air_quality_sensor_endpoint_id) {
-
     }
 
     return err;
@@ -363,6 +430,9 @@ esp_err_t app_driver_attribute_update(uint16_t endpoint_id, uint32_t cluster_id,
 
 
 void app_driver_event_loop() {
+    // TODO replace with FreeRTOS task that reads sensor
+    // app_driver_update_air_quality();
+
     ButtonEvent event;
     while (xQueueReceive(button_queue, &event, portMAX_DELAY) == pdPASS) {
         ESP_LOGI(TAG, "Button pressed (pin: %i, longPress: %i)", event.pin, event.longPress);
@@ -385,4 +455,4 @@ void app_driver_event_loop() {
             }
         }
     }
-} 
+}

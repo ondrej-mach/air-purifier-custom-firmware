@@ -48,7 +48,7 @@ void led_rgb_init() {
     ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
 
     ledc_channel_config_t ledc_conf_r = {
-        .gpio_num = GPIO_RGB_R,
+        .gpio_num = GPIO_LED_GREEN,
         .speed_mode = LEDC_MODE,
         .channel = LEDC_CHANNEL_RGB_R,
         .intr_type = LEDC_INTR_DISABLE,
@@ -59,7 +59,7 @@ void led_rgb_init() {
     ledc_channel_config(&ledc_conf_r);
 
     ledc_channel_config_t ledc_conf_g = {
-        .gpio_num = GPIO_RGB_G,
+        .gpio_num = GPIO_LED_ORANGE,
         .speed_mode = LEDC_MODE,
         .channel = LEDC_CHANNEL_RGB_G,
         .intr_type = LEDC_INTR_DISABLE,
@@ -70,7 +70,7 @@ void led_rgb_init() {
     ledc_channel_config(&ledc_conf_g);
 
     ledc_channel_config_t ledc_conf_b = {
-        .gpio_num = GPIO_RGB_B,
+        .gpio_num = GPIO_LED_RED,
         .speed_mode = LEDC_MODE,
         .channel = LEDC_CHANNEL_RGB_B,
         .intr_type = LEDC_INTR_DISABLE,
